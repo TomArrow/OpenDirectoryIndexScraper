@@ -16,6 +16,8 @@ namespace OpenDirectoryIndexScraper
             return string.Join(replacement, path.Split(badChars));
         }
 
+        static bool getFileSizes = false;
+
         static void Main(string[] args)
         {
             List<Task> tasks = new List<Task>();
@@ -39,8 +41,7 @@ namespace OpenDirectoryIndexScraper
 
         //private static Regex linkGetter = new Regex(@"<a\s+href=""(?<link>[^/\?""]+)(?<linkDirSep>/?)"">(?<linkText>[^/\?""<]+)(?<linkTextDirSep>/?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
         private static Regex linkGetter = new Regex(@"<a\s+href=""(?<link>[^/\?""]+)(?<linkDirSep>/?)"">\s*(<img[^>]*?>)?\s*(?<linkText>[^/\?""<]+)(?<linkTextDirSep>/?)\s*</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
-        
-        
+
        
         private struct PathPair
         {
@@ -117,18 +118,26 @@ namespace OpenDirectoryIndexScraper
 
                                         long? fileSize = null;
 
-                                        PatientRequester.Response headResponse = await PatientRequester.head(absPath);
-
-                                        int? statusCode = headResponse.statusCode;
-                                        if (headResponse.success == true)
+                                        int? statusCode = null;
+                                        if (getFileSizes)
                                         {
-                                            fileSize = headResponse.headerContentLength;
-                                        }
-                                        else
-                                        {
-                                            File.AppendAllText(shFile, "# Error "+headResponse.statusCode+" during HEAD to \"" + absPath + "\", possibly can't be downloaded" + "\n");
-                                        }
+                                            PatientRequester.Response headResponse = await PatientRequester.head(absPath);
 
+                                            statusCode = headResponse.statusCode;
+                                            if (headResponse.success == true)
+                                            {
+                                                fileSize = headResponse.headerContentLength;
+                                            }
+                                            else
+                                            {
+                                                File.AppendAllText(shFile, "# Error " + headResponse.statusCode + " during HEAD to \"" + absPath + "\", possibly can't be downloaded" + "\n");
+                                            }
+
+                                        } else
+                                        {
+                                            fileSize = -1;
+                                            statusCode = -1;
+                                        }
                                         string line =  absPath+";" + fileSize + ";" + localPath + ";"+currentUrl.localPath+";"+ statusCode;
                                         File.AppendAllText(csvFile, line + "\n");
                                         File.AppendAllText(shFile, "wget -c --retry-connrefused --tries=0 --timeout=500 -O '" + localPath + "' '" + absPath + "'"+" # Filesize: "+fileSize + "\n");
