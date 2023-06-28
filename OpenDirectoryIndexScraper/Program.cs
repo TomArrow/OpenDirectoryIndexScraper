@@ -142,6 +142,9 @@ namespace OpenDirectoryIndexScraper
                 //Dictionary<string, long?> foundFiles = new Dictionary<string, long?>();
                 urlsToScrape.Enqueue(new PathPair() { url= baseURL ,localPath=basePath});
 
+                int unchangedFoldersSkipped = 0;
+                int filesFound = 0;
+
                 while(urlsToScrape.Count > 0)
                 {
                     PathPair currentUrl = urlsToScrape.Peek();
@@ -209,7 +212,8 @@ namespace OpenDirectoryIndexScraper
                                                 }
                                                 else if(urlTimes[absPath] == parsedDateTime)
                                                 {
-                                                    Console.WriteLine("Directory date time seemingly not changed, skipping: " + localPath + "," + absPath);
+                                                    //Console.WriteLine("Directory date time seemingly not changed, skipping: " + localPath + "," + absPath);
+                                                    unchangedFoldersSkipped++;
                                                 } else
                                                 {
                                                     Console.WriteLine("Directory date time seemingly changed, enqueued: " + localPath + "," + absPath);
@@ -266,7 +270,8 @@ namespace OpenDirectoryIndexScraper
                                             string line =  absPath+";" + localPath + ";"+currentUrl.localPath+";"+ statusCode;
                                             //File.AppendAllText(csvFile, line + "\n");
                                             //File.AppendAllText(shFile, "wget -c --retry-connrefused --tries=0 --timeout=500 -O '" + localPath + "' '" + absPath + "'"+" # Filesize: "+fileSize + "\n");
-                                            Console.WriteLine("File found: "+line);
+                                            //Console.WriteLine("File found: "+line);
+                                            filesFound++;
                                             foundFiles.Add(new FoundFile() { absPath=absPath,localPath=localPath,parsedDateTime=parsedDateTime });
                                             //foundFiles.Add(absPath,fileSize);
                                         }
@@ -291,6 +296,8 @@ namespace OpenDirectoryIndexScraper
                     ((Action)(() => { }))(); // Just so i have a breakpoint.
                 }
 
+
+                Console.WriteLine($"{filesFound} files found, {unchangedFoldersSkipped} folders with unchanged datetime skipped.");
 
                 // Do we have proper offset info?
                 // Calculate it if we can.
@@ -355,7 +362,14 @@ namespace OpenDirectoryIndexScraper
                                 Console.WriteLine("Download succeeded. Saving.");
                                 Directory.CreateDirectory(Path.GetDirectoryName(foundFile.localPath));
                                 File.WriteAllBytes(fullLocalPath,response.rawData);
-                                File.SetLastWriteTime(fullLocalPath,fixedLocalDateTime);
+                                if (response.dateTime.HasValue) // More precise date modified if available :) Don't use for filename tho, else we can't tell what we already have.
+                                {
+                                    File.SetLastWriteTime(fullLocalPath, response.dateTime.Value);
+                                }
+                                else
+                                {
+                                    File.SetLastWriteTime(fullLocalPath, fixedLocalDateTime);
+                                }
                             }
                             else
                             {
