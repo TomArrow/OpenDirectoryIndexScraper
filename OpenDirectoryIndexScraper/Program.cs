@@ -144,6 +144,7 @@ namespace OpenDirectoryIndexScraper
 
                 int unchangedFoldersSkipped = 0;
                 int filesFound = 0;
+                int hrefNonMatch = 0;
 
                 while(urlsToScrape.Count > 0)
                 {
@@ -185,7 +186,8 @@ namespace OpenDirectoryIndexScraper
 
                                     if(link + linkDirSep != linkText + linkTextDirSep)
                                     {
-                                        Console.WriteLine("strange... href does not match text");
+                                        //Console.WriteLine("strange... href does not match text");
+                                        hrefNonMatch++;
                                     }
 
                                     string absPath = currentUrl.url + link + linkDirSep;
@@ -298,6 +300,11 @@ namespace OpenDirectoryIndexScraper
 
 
                 Console.WriteLine($"{filesFound} files found, {unchangedFoldersSkipped} folders with unchanged datetime skipped.");
+                if(hrefNonMatch > 0)
+                {
+
+                    Console.WriteLine($"NOTE: {hrefNonMatch}x href does not match text.");
+                }
 
                 // Do we have proper offset info?
                 // Calculate it if we can.
