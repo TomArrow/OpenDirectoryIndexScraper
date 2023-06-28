@@ -20,6 +20,8 @@ namespace OpenDirectoryIndexScraper
 
         static void Main(string[] args)
         {
+            bool isMonitor = args.Length > 0 && args[0] == "-monitor";
+
             List<Task> tasks = new List<Task>();
 
             foreach(string arg in args)

@@ -22,6 +22,7 @@ namespace OpenDirectoryIndexScraper
             //public string headerContentEncoding;
             public long? headerContentLength;
             public int? statusCode;
+            public DateTime? dateTime;
             //public Dictionary<string, string> responseHeaders;
         }
 
@@ -46,6 +47,7 @@ namespace OpenDirectoryIndexScraper
                     retVal.responseAsString = await response.Content.ReadAsStringAsync();
                     retVal.headerContentType = response.Content.Headers.ContentType != null ? response.Content.Headers.ContentType.ToString() : null;
                     retVal.headerContentLength = response.Content.Headers.ContentLength;
+                    retVal.dateTime = response.Content.Headers.LastModified.HasValue ? response.Content.Headers.LastModified.Value.LocalDateTime : null;
                     success = true;
                 }
                 catch (Exception e)
@@ -84,6 +86,7 @@ namespace OpenDirectoryIndexScraper
                     retVal.responseAsString = await response.Content.ReadAsStringAsync();
                     retVal.headerContentType = response.Content.Headers.ContentType != null ? response.Content.Headers.ContentType.ToString() : null; 
                     retVal.headerContentLength = response.Content.Headers.ContentLength;
+                    retVal.dateTime = response.Content.Headers.LastModified.HasValue ? response.Content.Headers.LastModified.Value.LocalDateTime : null;
                     success = true;
                 }
                 catch (Exception e)
@@ -122,6 +125,7 @@ namespace OpenDirectoryIndexScraper
                     //retVal.responseAsString = await response.Content.ReadAsStringAsync();
                     retVal.headerContentType = response.Content.Headers.ContentType != null ? response.Content.Headers.ContentType.ToString() : null;
                     retVal.headerContentLength = response.Content.Headers.ContentLength;
+                    retVal.dateTime = response.Content.Headers.LastModified.HasValue ? response.Content.Headers.LastModified.Value.LocalDateTime : null;
                     success = true;
                 }
                 catch (Exception e)
