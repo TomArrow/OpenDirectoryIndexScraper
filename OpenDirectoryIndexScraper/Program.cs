@@ -104,6 +104,7 @@ namespace OpenDirectoryIndexScraper
             //File.AppendAllText(csvFile, @"URL;Size;LocalPath;LocalFolder;StatusCode"+"\n");
 
             Dictionary<string, DateTime> urlTimes = new Dictionary<string, DateTime>();
+            List<string> directoriesWithSubFolders = new List<string>();
 
             bool serverGivesDateModified = true;
             const int dateTimeModifiedOffsetsRequired = 5;
@@ -189,13 +190,24 @@ namespace OpenDirectoryIndexScraper
 
                                     if (linkDirSep != "")
                                     {
+
                                         // It's a folder
-                                        if(link != ".." && link != ".") // We only go deeper, not up.
+                                        if (link != ".." && link != ".") // We only go deeper, not up.
                                         {
+                                            if (!directoriesWithSubFolders.Contains(currentUrl.url))
+                                            {
+                                                directoriesWithSubFolders.Add(currentUrl.url);
+                                            }
+
                                             //File.AppendAllText(shFile, "mkdir -p '"+localPath+"'" + "\n");
                                             if (urlTimes.ContainsKey(absPath))
                                             {
-                                                if(urlTimes[absPath] == parsedDateTime)
+                                                if (directoriesWithSubFolders.Contains(absPath))
+                                                {
+                                                    Console.WriteLine("Directory contains subfolders, hence cannot determine if changed; enqueued: " + localPath + "," + absPath);
+                                                    urlsToScrape.Enqueue(new PathPair() { url = absPath, localPath = localPath });
+                                                }
+                                                else if(urlTimes[absPath] == parsedDateTime)
                                                 {
                                                     Console.WriteLine("Directory date time seemingly not changed, skipping: " + localPath + "," + absPath);
                                                 } else
