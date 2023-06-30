@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,14 @@ using System.Web;
 
 namespace OpenDirectoryIndexScraper
 {
+
+
+    public struct FoundFile
+    {
+        public string localPath;
+        public string absPath;
+        public DateTime parsedDateTime;
+    }
     class Program
     {
 
@@ -66,62 +75,109 @@ namespace OpenDirectoryIndexScraper
             public string localPath;
         }
 
-        static bool executionEndRequested = false;
-        
-        static Mutex consoleReadMutex = new Mutex();
-        static bool ShouldEnd()
+        static void EvaluateKeys()
         {
             lock (consoleReadMutex)
             {
                 while (Console.KeyAvailable)
                 {
-                    if (Console.ReadKey(false).Key == ConsoleKey.Escape)
+                    var readKey = Console.ReadKey(false);
+                    if (readKey.Key == ConsoleKey.Escape)
                     {
                         executionEndRequested = true;
-                        return true;
+                    }
+                    if (readKey.Key == ConsoleKey.DownArrow)
+                    {
+                        executionContinueRequested = true;
                     }
                 }
-                if (executionEndRequested) return true;
-                return false;
             }
         }
 
-
-        struct FoundFile
+        static bool executionEndRequested = false;
+        static bool executionContinueRequested = false;
+        
+        static Mutex consoleReadMutex = new Mutex();
+        static bool ShouldEnd()
         {
-            public string localPath;
-            public string absPath;
-            public DateTime parsedDateTime;
+            EvaluateKeys();
+            if (executionEndRequested) return true;
+            return false;
         }
+        static bool ShouldContinue()
+        {
+            EvaluateKeys();
+            if (executionContinueRequested)
+            {
+                executionContinueRequested = false;
+                return true;
+            }
+            return false;
+        }
+
+
 
         static async Task monitor(string baseURL,int reCrawlDelay)
         {
 
-            //string csvFile = GetUnusedFilename(MakeValidFileName(baseURL)+".csv");
-            //string shFile = GetUnusedFilename(MakeValidFileName(baseURL)+".sh");
+            JsonSerializerOptions opts = new JsonSerializerOptions();
+            opts.NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals | System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString;
+            opts.WriteIndented = true;
 
-            //File.AppendAllText(shFile,@"#!/bin/bash"+"\n");
-            //File.AppendAllText(csvFile, @"URL;Size;LocalPath;LocalFolder;StatusCode"+"\n");
+            string stateJSONFile = "ODIS_state_"+MakeValidFileName(baseURL) + ".json";
 
-            Dictionary<string, DateTime> urlTimes = new Dictionary<string, DateTime>();
-            List<string> directoriesWithSubFolders = new List<string>();
+            //Dictionary<string, DateTime> urlTimes = new Dictionary<string, DateTime>();
+            //List<string> directoriesWithSubFolders = new List<string>();
 
-            bool serverGivesDateModified = true;
+            MonitorState ms = new MonitorState();
+
+            if (File.Exists(stateJSONFile))
+            {
+                string lines = File.ReadAllText(stateJSONFile); 
+                MonitorState deSerialized = JsonSerializer.Deserialize<MonitorState>(lines, opts);
+                if(ms != null)
+                {
+                    ms = deSerialized;
+                }
+                /*if(deSerialized.urlTimes != null)
+                {
+                    urlTimes = deSerialized.urlTimes;
+                }
+                if(deSerialized.directoriesWithSubFolders != null)
+                {
+                    directoriesWithSubFolders = deSerialized.directoriesWithSubFolders;
+                }*/
+            }
+
+
+            //bool serverGivesDateModified = true;
             const int dateTimeModifiedOffsetsRequired = 5;
-            List<Int64> dateModifiedOffsets = new List<Int64>();
-            TimeSpan? dateModifiedDeterminedOffset = null;
+            //List<Int64> dateModifiedOffsets = new List<Int64>();
+            //TimeSpan? dateModifiedDeterminedOffset = null;
 
-            List<FoundFile> foundFiles = new List<FoundFile>();
+            //List<FoundFile> foundFiles = new List<FoundFile>();
 
-            bool alreadyRun = false;
+            //bool alreadyRun = false;
             while (true) {
 
-                foundFiles.Clear();
-                Console.WriteLine("Press ESC to stop monitoring. (Will exit at next crawl interval)");
-                if (alreadyRun) System.Threading.Thread.Sleep(reCrawlDelay);
+                ms.foundFiles.Clear();
+                Console.WriteLine($"Press ESC to stop monitoring, or arrow-down to do next crawl now (current default delay: {reCrawlDelay}ms)");
+                int doneDelay = 0;
+                if (ms.alreadyRun)
+                {
+                    while(doneDelay < reCrawlDelay)
+                    {
+                        System.Threading.Thread.Sleep(1000);
+                        doneDelay += 1000;
+                        if (ShouldEnd() || ShouldContinue())
+                        {
+                            break;
+                        }
+                    }
+                }
                 if (ShouldEnd())
                 {
-                    return;
+                    break;
                 }
 
                 Uri myUri = new Uri(baseURL);
@@ -199,20 +255,20 @@ namespace OpenDirectoryIndexScraper
                                         // It's a folder
                                         if (link != ".." && link != ".") // We only go deeper, not up.
                                         {
-                                            if (!directoriesWithSubFolders.Contains(currentUrl.url))
+                                            if (!ms.directoriesWithSubFolders.Contains(currentUrl.url))
                                             {
-                                                directoriesWithSubFolders.Add(currentUrl.url);
+                                                ms.directoriesWithSubFolders.Add(currentUrl.url);
                                             }
 
                                             //File.AppendAllText(shFile, "mkdir -p '"+localPath+"'" + "\n");
-                                            if (urlTimes.ContainsKey(absPath))
+                                            if (ms.urlTimes.ContainsKey(absPath))
                                             {
-                                                if (directoriesWithSubFolders.Contains(absPath))
+                                                if (ms.directoriesWithSubFolders.Contains(absPath))
                                                 {
                                                     Console.WriteLine("Directory contains subfolders, hence cannot determine if changed; enqueued: " + localPath + "," + absPath);
                                                     urlsToScrape.Enqueue(new PathPair() { url = absPath, localPath = localPath });
                                                 }
-                                                else if(urlTimes[absPath] == parsedDateTime)
+                                                else if(ms.urlTimes[absPath] == parsedDateTime)
                                                 {
                                                     //Console.WriteLine("Directory date time seemingly not changed, skipping: " + localPath + "," + absPath);
                                                     unchangedFoldersSkipped++;
@@ -226,7 +282,7 @@ namespace OpenDirectoryIndexScraper
                                                 Console.WriteLine("Directory not yet crawled this run, enqueued: " + localPath + "," + absPath);
                                                 urlsToScrape.Enqueue(new PathPair() { url = absPath, localPath = localPath });
                                             }
-                                            urlTimes[absPath] = parsedDateTime;
+                                            ms.urlTimes[absPath] = parsedDateTime;
                                         }
                                     } else
                                     {
@@ -237,7 +293,7 @@ namespace OpenDirectoryIndexScraper
                                             long? fileSize = null;
 
                                             int? statusCode = null;
-                                            if (/*getFileSizes*/serverGivesDateModified && dateModifiedDeterminedOffset == null && dateModifiedOffsets.Count < dateTimeModifiedOffsetsRequired)
+                                            if (/*getFileSizes*/ms.serverGivesDateModified && ms.dateModifiedDeterminedOffset == null && ms.dateModifiedOffsets.Count < dateTimeModifiedOffsetsRequired)
                                             {
                                                 // We are not doing this in order to get the actual datetime. We wanna parse the actual datetime from the listing.
                                                 // But in order to get the time in the correct tiemzone, we need to calculate the offset from the server listing's displayed time
@@ -250,13 +306,13 @@ namespace OpenDirectoryIndexScraper
                                                     //fileSize = headResponse.headerContentLength;
                                                     if (!headResponse.dateTime.HasValue)
                                                     {
-                                                        serverGivesDateModified = false;
+                                                        ms.serverGivesDateModified = false;
                                                         Console.WriteLine("Server does not send Date-Modified.: " + localPath + "," + absPath);
                                                     } else
                                                     {
                                                         Int64 dateModifiedOffset = (Int64)(Math.Floor((headResponse.dateTime.Value - parsedDateTime).TotalSeconds/60)+0.5f);
-                                                        dateModifiedOffsets.Add(dateModifiedOffset);
-                                                        Console.WriteLine($"Date modified offset {dateModifiedOffsets.Count}/{dateTimeModifiedOffsetsRequired} logged: {headResponse.dateTime.Value}-{parsedDateTime}={dateModifiedOffset}  :"+ localPath + "," + absPath);
+                                                        ms.dateModifiedOffsets.Add(dateModifiedOffset);
+                                                        Console.WriteLine($"Date modified offset {ms.dateModifiedOffsets.Count}/{dateTimeModifiedOffsetsRequired} logged: {headResponse.dateTime.Value}-{parsedDateTime}={dateModifiedOffset}  :"+ localPath + "," + absPath);
                                                     }
                                                 }
                                                 else
@@ -274,7 +330,7 @@ namespace OpenDirectoryIndexScraper
                                             //File.AppendAllText(shFile, "wget -c --retry-connrefused --tries=0 --timeout=500 -O '" + localPath + "' '" + absPath + "'"+" # Filesize: "+fileSize + "\n");
                                             //Console.WriteLine("File found: "+line);
                                             filesFound++;
-                                            foundFiles.Add(new FoundFile() { absPath=absPath,localPath=localPath,parsedDateTime=parsedDateTime });
+                                            ms.foundFiles.Add(new FoundFile() { absPath=absPath,localPath=localPath,parsedDateTime=parsedDateTime });
                                             //foundFiles.Add(absPath,fileSize);
                                         }
                                     }
@@ -308,17 +364,17 @@ namespace OpenDirectoryIndexScraper
 
                 // Do we have proper offset info?
                 // Calculate it if we can.
-                if(!dateModifiedDeterminedOffset.HasValue && dateModifiedOffsets.Count >= dateTimeModifiedOffsetsRequired)
+                if(!ms.dateModifiedDeterminedOffset.HasValue && ms.dateModifiedOffsets.Count >= dateTimeModifiedOffsetsRequired)
                 {
                     Console.WriteLine("Trying to calculate date modified offset median.");
                     // Get median
-                    dateModifiedOffsets.Sort();
-                    Int64 median = dateModifiedOffsets[dateModifiedOffsets.Count/2]; // For example count is 5. divide by 2 = 2.5 (but since integer, it's 2). And 2 is perfect middle index.
+                    ms.dateModifiedOffsets.Sort();
+                    Int64 median = ms.dateModifiedOffsets[ms.dateModifiedOffsets.Count/2]; // For example count is 5. divide by 2 = 2.5 (but since integer, it's 2). And 2 is perfect middle index.
                     // Now check if the median is 
                     Console.WriteLine($"Median is {median}. Now checking consistency.");
 
                     int countConsistent = 0;
-                    foreach(Int64 doffset in dateModifiedOffsets)
+                    foreach(Int64 doffset in ms.dateModifiedOffsets)
                     {
                         if(doffset == median)
                         {
@@ -332,28 +388,31 @@ namespace OpenDirectoryIndexScraper
 
                     if (countConsistent >= dateTimeModifiedOffsetsRequired - 1) // Allow 1 to be inconsistent
                     {
-                        Console.WriteLine($"Median is consistent with {countConsistent} of {dateModifiedOffsets.Count} measured offsets. Ok!");
-                        dateModifiedDeterminedOffset = new TimeSpan(0, (int)median,0);
+                        Console.WriteLine($"Median is consistent with {countConsistent} of {ms.dateModifiedOffsets.Count} measured offsets. Ok!");
+                        //ms.dateModifiedDeterminedOffset = new TimeSpan(0, (int)median,0);
+                        ms.dateModifiedDeterminedOffset = median;
                     } else
                     {
-                        Console.WriteLine($"Median is consistent with {countConsistent} of {dateModifiedOffsets.Count} measured offsets. Not ok, purging offsets.");
-                        dateModifiedOffsets.Clear();
+                        Console.WriteLine($"Median is consistent with {countConsistent} of {ms.dateModifiedOffsets.Count} measured offsets. Not ok, purging offsets.");
+                        ms.dateModifiedOffsets.Clear();
                     }
 
-                } else if (!serverGivesDateModified)
+                } else if (!ms.serverGivesDateModified)
                 {
                     Console.WriteLine("Server does not send Date-Modified header. Setting offset to 0.");
-                    dateModifiedDeterminedOffset = new TimeSpan(0);
+                    //ms.dateModifiedDeterminedOffset = new TimeSpan(0);
+                    ms.dateModifiedDeterminedOffset = 0;
                 }
 
                 // Ok do actual processing of files maybe.
-                if(dateModifiedDeterminedOffset.HasValue)
+                if(ms.dateModifiedDeterminedOffset.HasValue)
                 {
                     Console.WriteLine($"Processing found files...");
                     int countAlreadyExisting = 0;
-                    foreach(FoundFile foundFile in foundFiles)
+                    foreach(FoundFile foundFile in ms.foundFiles)
                     {
-                        DateTime fixedLocalDateTime = foundFile.parsedDateTime + dateModifiedDeterminedOffset.Value;
+                        //DateTime fixedLocalDateTime = foundFile.parsedDateTime + ms.dateModifiedDeterminedOffset.Value;
+                        DateTime fixedLocalDateTime = foundFile.parsedDateTime + new TimeSpan(0, (int)ms.dateModifiedDeterminedOffset.Value, 0);
                         string fixedLocalDateTimeString = fixedLocalDateTime.ToString("yyyy-MM-dd_HH-mm-ss");
                         string fullLocalPath = Path.Combine(Path.GetDirectoryName(foundFile.localPath),$"{fixedLocalDateTimeString}_{Path.GetFileNameWithoutExtension(foundFile.localPath)}{Path.GetExtension(foundFile.localPath)}");
                         if (File.Exists(fullLocalPath))
@@ -388,13 +447,22 @@ namespace OpenDirectoryIndexScraper
                 } else
                 {
                     Console.WriteLine($"Cannot process found files. Date modified offset not determined yet.");
-                    urlTimes.Clear(); // Otherwise it won't redownload. Bad.
+                    ms.urlTimes.Clear(); // Otherwise it won't redownload. Bad.
                 }
 
 
-                alreadyRun = true;
+                ms.alreadyRun = true;
 
             }
+
+
+            string saveFileDataJson = JsonSerializer.Serialize(ms, opts);
+
+            if(saveFileDataJson != null)
+            {
+                File.WriteAllText(stateJSONFile, saveFileDataJson);
+            }
+
             //File.AppendAllText(shFile, @"read -n1 -r" + "\n");
         }
         
