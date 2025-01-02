@@ -67,6 +67,8 @@ namespace OpenDirectoryIndexScraper
         //private static Regex linkGetter = new Regex(@"<a\s+href=""(?<link>[^/\?""]+)(?<linkDirSep>/?)"">(?<linkText>[^/\?""<]+)(?<linkTextDirSep>/?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
         private static Regex linkGetter = new Regex(@"<a\s+href=""(?<link>[^/\?""]+)(?<linkDirSep>/?)"">\s*(<img[^>]*?>)?\s*(?<linkText>[^/\?""<]+)(?<linkTextDirSep>/?)\s*</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
         private static Regex linkGetterDate = new Regex(@"<a\s+href=""(?<link>[^\/\?""]+)(?<linkDirSep>\/?)"">\s*(<img[^>]*?>)?\s*(?<linkText>[^\/\?""<]+)(?<linkTextDirSep>\/?)\s*<\/a>[^\n\r]*?(?<dateTime>\d+-[^\n\r]+?)(?:  |<)", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+        private static Regex linkGetterDateMongoose = new Regex(@"<a\s+href=""(?<link>[^\/\?""]+)(?<linkDirSep>\/?)"">\s*(<img[^>]*?>)?\s*(?<linkText>[^\/\?""<]+)(?<linkTextDirSep>\/?)\s*<\/a>[^\n\r]*?<\/td>\s*<td\s+name=\s*(?<dateTime>\d+)>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+        private static Regex mongooseDetect = new Regex(@"<address>Mongoose v.(?<version>[^<\n\r]*)<\/address><\/body><\/html>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
 
        
         private struct PathPair
@@ -208,7 +210,18 @@ namespace OpenDirectoryIndexScraper
                     PatientRequester.Response response = await PatientRequester.get(currentUrl.url);
                     if(response.success == true)
                     {
-                        MatchCollection matches = linkGetterDate.Matches(response.responseAsString);
+                        MatchCollection matches;
+                        bool isMongoose = false;
+                        if (mongooseDetect.Match(response.responseAsString).Success)
+                        {
+                            isMongoose = true;
+                            matches = linkGetterDateMongoose.Matches(response.responseAsString);
+                        }
+                        else
+                        {
+                            matches = linkGetterDate.Matches(response.responseAsString);
+                        }
+
 
                         if(matches != null)
                         {
@@ -224,20 +237,37 @@ namespace OpenDirectoryIndexScraper
                                     string dateTimeText = match.Groups["dateTime"].Value;
 
                                     DateTime parsedDateTime;
-                                    try {
-
-                                        parsedDateTime = DateTime.Parse(dateTimeText);
-                                        if(parsedDateTime.Kind == DateTimeKind.Unspecified)
-                                        {
-                                            parsedDateTime = DateTime.SpecifyKind(parsedDateTime, DateTimeKind.Local);
-                                        } else
-                                        {
-                                            parsedDateTime = parsedDateTime.ToLocalTime();
-                                        }
-                                    } catch(Exception e)
+                                    if (isMongoose)
                                     {
-                                        Console.WriteLine($"Datetime '{dateTimeText}' parse error: {e.ToString()}");
-                                        continue;
+                                        long time = 0;
+                                        if(long.TryParse(dateTimeText,out time))
+                                        {
+                                            parsedDateTime = DateTimeOffset.FromUnixTimeSeconds(time).UtcDateTime.ToLocalTime();
+                                        }
+                                        else
+                                        {
+                                            Console.WriteLine($"Mongoose timestamp '{dateTimeText}' parse error.");
+                                            continue;
+                                        }
+                                    }
+                                    else
+                                    {
+
+                                        try {
+
+                                            parsedDateTime = DateTime.Parse(dateTimeText);
+                                            if(parsedDateTime.Kind == DateTimeKind.Unspecified)
+                                            {
+                                                parsedDateTime = DateTime.SpecifyKind(parsedDateTime, DateTimeKind.Local);
+                                            } else
+                                            {
+                                                parsedDateTime = parsedDateTime.ToLocalTime();
+                                            }
+                                        } catch(Exception e)
+                                        {
+                                            Console.WriteLine($"Datetime '{dateTimeText}' parse error: {e.ToString()}");
+                                            continue;
+                                        }
                                     }
 
                                     if(link + linkDirSep != linkText + linkTextDirSep)
