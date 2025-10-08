@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -29,21 +30,169 @@ namespace OpenDirectoryIndexScraper
 
         static bool getFileSizes = false;
 
+        enum Mode { 
+            Normal,
+            Monitor,
+            Restore
+        }
+
+        class FileToRestore {
+            public string filename;
+            public string trueFilename;
+            public string originalPath;
+            public DateTime date;
+
+            static int prefixLength = "yyyy-MM-dd_HH-mm-ss_".Length;
+
+            //yyyy-MM-dd_HH-mm-ss
+            static Regex dateParse = new Regex(@"^(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})_(?<h>\d{2})-(?<min>\d{2})-(?<s>\d{2})", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+            public FileToRestore(string path, StringBuilder sb)
+            {
+                trueFilename = filename = Path.GetFileName(path);
+                date = File.GetLastWriteTime(path);
+                originalPath = path;
+
+                Match dateMatch = dateParse.Match(filename);
+                if (dateMatch.Success)
+                {
+                    DateTime tmpDate = new DateTime(int.Parse(dateMatch.Groups["y"].Value), int.Parse(dateMatch.Groups["m"].Value), int.Parse(dateMatch.Groups["d"].Value), int.Parse(dateMatch.Groups["h"].Value), int.Parse(dateMatch.Groups["min"].Value), int.Parse(dateMatch.Groups["s"].Value), DateTimeKind.Local);
+                    if(tmpDate != date)
+                    {
+                        Console.WriteLine($"Warning: Date mismatch between last written and parsed date on {trueFilename}: {date} (last written) vs {tmpDate} (parsed)");
+                        sb.AppendLine($"# Warning: Date mismatch between last written and parsed date on {trueFilename}: {date} (last written) vs {tmpDate} (parsed)");
+                        date = tmpDate;
+                    }
+                    //if(tmpDate < date)
+                    //{
+                    //    date = tmpDate;
+                    //}
+                    if(filename.Length > prefixLength)
+                    {
+                        filename = filename.Substring(prefixLength);
+                    }
+                }
+            }
+        }
+
+
+        static void GetFileDate(string path, string filename)
+        {
+
+        }
+
+        static void Restore(string rootIn, string rootOut, string inFolder, string outFolder, StringBuilder sb)
+        {
+            string relOut = Path.GetRelativePath(rootOut, outFolder);
+            if(relOut != ".")
+            {
+                sb.AppendLine($"mkdir -p \"{Path.Combine(rootOut,relOut)}\"");
+            }
+
+            //inFolder = Path.GetFullPath(inFolder);
+            //outFolder = Path.GetFullPath(outFolder);
+
+            string[] filePaths = Directory.GetFiles(inFolder);
+            List<FileToRestore> files = new List<FileToRestore>();
+            foreach(string file in filePaths)
+            {
+                files.Add(new FileToRestore(file,sb));
+            }
+
+            foreach(FileToRestore file in files)
+            {
+                bool haveNewerVersion = false;
+                bool unresolvable = false;
+                FileToRestore newestVersion = null;
+                int alts = 0;
+                List<FileToRestore> unresolvables = new List<FileToRestore>();
+                foreach (FileToRestore file2 in files)
+                {
+                    if(file2.filename == file.filename)
+                    {
+                        if (file == file2) continue;
+                        alts++;
+                        if (file2.date > file.date)
+                        {
+                            haveNewerVersion = true;
+                            newestVersion = file2;
+                        } else if (file2.date == file.date)
+                        {
+                            unresolvable = true;
+                            unresolvables.Add(file2);
+                        }
+                    }
+                }
+                if (unresolvable)
+                {
+                    Console.WriteLine($"Ignoring {file.trueFilename}, unresolvable date conflict (identical date) with the following files:");
+                    sb.AppendLine($"# Ignoring {file.trueFilename}, unresolvable date conflict (identical date) with the following files:");
+                    foreach (FileToRestore f in unresolvables)
+                    {
+                        Console.WriteLine(f.trueFilename);
+                        sb.AppendLine($"# {f.trueFilename}");
+                    }
+                    continue;
+                }
+                if (haveNewerVersion)
+                {
+                    Console.WriteLine($"Ignoring {file.trueFilename}, {newestVersion.trueFilename} is newer ({alts+1} variants total).");
+                    continue;
+                }
+                Console.WriteLine($"Copying {file.trueFilename} ({alts} older dupes skipped).");
+                //string relIn = Path.GetRelativePath(rootIn, file.filename);
+                string outname = Path.Combine(rootOut,relOut, file.filename);
+                if(alts> 0)
+                {
+                    sb.AppendLine($"# {alts} dupes skipped");
+                }
+                sb.AppendLine($"cp -p \"{file.originalPath}\" \"{outname}\" ");
+            }
+
+            string[] folders = Directory.GetDirectories(inFolder);
+            foreach(string folder in folders)
+            {
+                string newOut = Path.Combine(outFolder, Path.GetRelativePath(inFolder, folder));
+                Restore(rootIn,rootOut, folder, newOut,sb);
+            }
+        }
+
         static void Main(string[] args)
         {
-            bool isMonitor = args.Length > 1 && args[0] == "-monitor";
+            Mode mode = Mode.Normal;
+            mode = args.Length > 1 && args[0] == "-monitor" ? Mode.Monitor : mode;
+            mode = args.Length > 1 && args[0] == "-restore" ? Mode.Restore : mode;
             int monitorRecrawlDelay = 60000;
-            if (isMonitor) monitorRecrawlDelay = int.Parse(args[1]);
+            if (mode == Mode.Monitor) monitorRecrawlDelay = int.Parse(args[1]);
 
             List<Task> tasks = new List<Task>();
+
+            if(mode == Mode.Restore)
+            {
+                if(args.Length < 3)
+                {
+                    Console.WriteLine( "need in and out folder");
+                    return;
+                }
+                string inFolder = args[1];
+                string outFolder = args[2];
+                if (!Directory.Exists(inFolder))
+                {
+                    Console.WriteLine("in folder not found");
+                    return;
+                }
+                StringBuilder sb = new StringBuilder();
+                Restore(inFolder, outFolder, inFolder, outFolder,sb);
+                File.WriteAllText(GetUnusedFilename("restore.sh"),sb.ToString());
+                return;
+            }
 
             int index = 0;
             foreach(string arg in args)
             {
-                if (isMonitor && index++ > 1)
+                if (mode == Mode.Monitor && index++ > 1)
                 {
                     tasks.Add(monitor(arg, monitorRecrawlDelay));
-                } else if(!isMonitor)
+                } else if(mode == Mode.Normal)
                 {
                     tasks.Add(scrape(arg));
                 }
@@ -378,6 +527,10 @@ namespace OpenDirectoryIndexScraper
                         {
                             //File.AppendAllText(shFile, @"# Failed to scrape "+currentUrl.url+", error "+response.statusCode + "\n");
                             urlsToScrape.Dequeue();
+                        }
+                        else
+                        {
+                            urlsToScrape.Dequeue(); // eh we have to do thiis anyway? to avoid endless loop?
                         }
                     }
 

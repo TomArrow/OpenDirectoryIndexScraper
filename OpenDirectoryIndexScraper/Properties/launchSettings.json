@@ -2,7 +2,7 @@
   "profiles": {
     "OpenDirectoryIndexScraper": {
       "commandName": "Project",
-      "commandLineArgs": "-monitor 30000 \"http://74.91.123.120/demos/\""
+      "commandLineArgs": "-restore demos demos_restored"
     }
   }
 }
